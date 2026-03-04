@@ -10,7 +10,7 @@ import json
 from typing import TypedDict
 
 import requests
-from recipe_scrapers import scrape_me
+from recipe_scrapers import scrape_html
 
 class NetworkError(Exception):
     """Raised when the recipe URL cannot be fetched (connection / HTTP error)."""
@@ -33,6 +33,7 @@ class RecipeData(TypedDict):
     cuisine: str | None
     category: str | None
     language: str | None
+    wild_mode_used: bool
     warnings: list[str]
 
 def scrape_recipe(url: str) -> RecipeData:
@@ -50,12 +51,25 @@ def scrape_recipe(url: str) -> RecipeData:
         NetworkError: If the URL cannot be fetched.
         ParsingError: If recipe data cannot be extracted from the page.
     """
+    # Step 1: fetch raw HTML (network errors surface here)
     try:
-        scraper = scrape_me(url)
+        response = requests.get(url, timeout=15)
+        response.raise_for_status()
     except requests.exceptions.RequestException as e:
         raise NetworkError(f"Failed to fetch {url!r}: {e}") from e
-    except Exception as e:
-        raise ParsingError(f"Failed to parse recipe at {url!r}: {e}") from e
+
+    html = response.text
+
+    # Step 2: try strict parsing, fall back to wild mode on failure
+    wild_mode_used = False
+    try:
+        scraper = scrape_html(html, org_url=url, wild_mode=False)
+    except Exception:
+        try:
+            scraper = scrape_html(html, org_url=url, wild_mode=True)
+            wild_mode_used = True
+        except Exception as e:
+            raise ParsingError(f"Failed to parse recipe at {url!r}: {e}") from e
 
     def safe(fn):
         """Call fn(), returning None on any exception or blank/empty result."""
@@ -81,6 +95,7 @@ def scrape_recipe(url: str) -> RecipeData:
         "cuisine": safe(scraper.cuisine),
         "category": safe(scraper.category),
         "language": safe(scraper.language),
+        "wild_mode_used": wild_mode_used,
         "warnings": [],
     }
 
@@ -97,7 +112,7 @@ if __name__ == "__main__":
 
     try:
         result = scrape_recipe(args.url)
-        print(json.dumps(result, indent=2))
+        print(json.dumps(result, indent=2, ensure_ascii=False))
     except (NetworkError, ParsingError) as e:
         print(json.dumps({"error": type(e).__name__, "message": str(e)}, indent=2))
         raise SystemExit(1)
