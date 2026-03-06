@@ -2,22 +2,17 @@
 Recipe scraper module.
 
 Usage (CLI):    uv run python scraper.py --url <url>
-Usage (module): from scraper import scrape_recipe
+Usage (module): from scraper import scrape_url
 """
 
 import argparse
 import json
 from typing import TypedDict
 
-import requests
-from recipe_scrapers import scrape_html
+import httpx
+from fastapi import HTTPException
+from recipe_scrapers import scrape_html, scrape_me
 
-class NetworkError(Exception):
-    """Raised when the recipe URL cannot be fetched (connection / HTTP error)."""
-
-
-class ParsingError(Exception):
-    """Raised when the page loads but recipe data cannot be extracted."""
 
 class RecipeData(TypedDict):
     title: str | None
@@ -33,46 +28,23 @@ class RecipeData(TypedDict):
     cuisine: str | None
     category: str | None
     language: str | None
-    wild_mode_used: bool
+    method: str | None
     warnings: list[str]
 
-def scrape_recipe(url: str) -> RecipeData:
-    """
-    Scrape structured recipe data from the given URL.
 
-    Args:
-        url: The full URL of the recipe page.
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
 
-    Returns:
-        A RecipeData dict. Optional fields are None when absent.
-        ``warnings`` lists any missing required fields (title, ingredients, instructions).
 
-    Raises:
-        NetworkError: If the URL cannot be fetched.
-        ParsingError: If recipe data cannot be extracted from the page.
-    """
-    # Step 1: fetch raw HTML (network errors surface here)
-    try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        raise NetworkError(f"Failed to fetch {url!r}: {e}") from e
-
-    html = response.text
-
-    # Step 2: try strict parsing, fall back to wild mode on failure
-    wild_mode_used = False
-    try:
-        scraper = scrape_html(html, org_url=url, wild_mode=False)
-    except Exception:
-        try:
-            scraper = scrape_html(html, org_url=url, wild_mode=True)
-            wild_mode_used = True
-        except Exception as e:
-            raise ParsingError(f"Failed to parse recipe at {url!r}: {e}") from e
-
+def _build_result(scraper, url: str, method: str | None) -> RecipeData:
     def safe(fn):
-        """Call fn(), returning None on any exception or blank/empty result."""
         try:
             result = fn()
             if result in (None, "", [], {}):
@@ -95,7 +67,7 @@ def scrape_recipe(url: str) -> RecipeData:
         "cuisine": safe(scraper.cuisine),
         "category": safe(scraper.category),
         "language": safe(scraper.language),
-        "wild_mode_used": wild_mode_used,
+        "method": method,
         "warnings": [],
     }
 
@@ -105,14 +77,70 @@ def scrape_recipe(url: str) -> RecipeData:
 
     return data
 
+
+def scrape_url(url: str) -> RecipeData:
+    """
+    Scrape structured recipe data from the given URL.
+
+    Retry chain (stops at first success):
+      1. scrape_me(url) — standard scrape with built-in HTTP request
+      2. scrape_html(html, org_url=url) with wild_mode disabled
+      3. scrape_html(html, org_url=url, wild_mode=True) for more aggressive parsing
+
+    Returns:
+        RecipeData: Structured recipe information.
+
+    Raises:
+        HTTPException(422): If all three attempts fail.
+    """
+    last_error: Exception | None = None
+
+    # Attempt 1: scrape_me (handles its own HTTP request)
+    try:
+        scraper = scrape_me(url)
+        return _build_result(scraper, url, method="scrape_me")
+    except Exception as e:
+        last_error = e
+
+    # Fetch HTML once for attempts 2 and 3
+    html: str | None = None
+    try:
+        with httpx.Client(headers=_BROWSER_HEADERS, timeout=15, follow_redirects=True) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            html = response.content.decode("utf-8", errors="replace")
+    except Exception as e:
+        last_error = e
+
+    if html is not None:
+        # Attempt 2: scrape_html strict
+        try:
+            scraper = scrape_html(html, org_url=url, wild_mode=False)
+            return _build_result(scraper, url, method="scrape_html_strict")
+        except Exception as e:
+            last_error = e
+
+        # Attempt 3: scrape_html wild_mode
+        try:
+            scraper = scrape_html(html, org_url=url, wild_mode=True)
+            return _build_result(scraper, url, method="scrape_html_wild")
+        except Exception as e:
+            last_error = e
+
+    raise HTTPException(
+        status_code=422,
+        detail=f"Failed to scrape recipe from {url!r}. Last error: {last_error}",
+    )
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scrape a recipe from a URL.")
     parser.add_argument("--url", required=True, help="Full URL of the recipe page")
     args = parser.parse_args()
 
     try:
-        result = scrape_recipe(args.url)
+        result = scrape_url(args.url)
         print(json.dumps(result, indent=2, ensure_ascii=False))
-    except (NetworkError, ParsingError) as e:
+    except Exception as e:
         print(json.dumps({"error": type(e).__name__, "message": str(e)}, indent=2))
         raise SystemExit(1)
