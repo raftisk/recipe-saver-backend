@@ -7,29 +7,12 @@ Usage (module): from scraper import scrape_url
 
 import argparse
 import json
-from typing import TypedDict
 
 import httpx
 from fastapi import HTTPException
 from recipe_scrapers import scrape_html, scrape_me
 
-
-class RecipeData(TypedDict):
-    title: str | None
-    ingredients: list[str] | None
-    instructions: str | None
-    image: str | None
-    prep_time: int | None
-    cook_time: int | None
-    total_time: int | None
-    yields: str | None
-    host: str | None
-    url: str
-    cuisine: str | None
-    category: str | None
-    language: str | None
-    method: str | None
-    warnings: list[str]
+from schemas import RecipeData
 
 
 _BROWSER_HEADERS = {
@@ -53,7 +36,8 @@ def _build_result(scraper, url: str, method: str | None) -> RecipeData:
         except Exception:
             return None
 
-    data: RecipeData = {
+    warnings = []
+    fields = {
         "title": safe(scraper.title),
         "ingredients": safe(scraper.ingredients),
         "instructions": safe(scraper.instructions),
@@ -63,19 +47,16 @@ def _build_result(scraper, url: str, method: str | None) -> RecipeData:
         "total_time": safe(scraper.total_time),
         "yields": safe(scraper.yields),
         "host": safe(scraper.host),
-        "url": url,
         "cuisine": safe(scraper.cuisine),
         "category": safe(scraper.category),
         "language": safe(scraper.language),
-        "method": method,
-        "warnings": [],
     }
 
     for field in ("title", "ingredients", "instructions"):
-        if not data[field]:  # type: ignore[literal-required]
-            data["warnings"].append(f"Required field '{field}' is missing.")
+        if not fields[field]:
+            warnings.append(f"Required field '{field}' is missing.")
 
-    return data
+    return RecipeData(url=url, method=method, warnings=warnings, **fields)
 
 
 def scrape_url(url: str) -> RecipeData:
@@ -140,7 +121,7 @@ if __name__ == "__main__":
 
     try:
         result = scrape_url(args.url)
-        print(json.dumps(result, indent=2, ensure_ascii=False))
+        print(result.model_dump_json(indent=2))
     except Exception as e:
         print(json.dumps({"error": type(e).__name__, "message": str(e)}, indent=2))
         raise SystemExit(1)
