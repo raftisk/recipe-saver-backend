@@ -1,10 +1,7 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from database import init_db
 from schemas import RecipeData
 from scraper import scrape_url
 
@@ -13,13 +10,7 @@ class ParseRequest(BaseModel):
     url: str
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    init_db()
-    yield
-
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
