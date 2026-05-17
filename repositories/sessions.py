@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +14,7 @@ def _hash_token(raw: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now()
 
 
 async def create_session(

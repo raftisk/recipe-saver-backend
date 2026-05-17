@@ -1,30 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
 
-from schemas import RecipeData
-from scraper import scrape_url
-
-
-class ParseRequest(BaseModel):
-    url: str
-
+from api.auth import router as auth_router
+from api.errors import register_exception_handlers
+from config import settings
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+register_exception_handlers(app)
+
+app.include_router(auth_router)
 
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
-
-
-@app.post("/api/recipes/parse")
-def parse_recipe(body: ParseRequest) -> RecipeData:
-    return scrape_url(body.url)

@@ -29,6 +29,6 @@ async def update_password(session: AsyncSession, user: User, new_hash: str) -> N
 
 
 async def touch_last_sign_in(session: AsyncSession, user: User) -> None:
-    from datetime import datetime, timezone
-    user.last_sign_in_at = datetime.now(timezone.utc)
+    from datetime import datetime
+    user.last_sign_in_at = datetime.now()
     await session.flush()
