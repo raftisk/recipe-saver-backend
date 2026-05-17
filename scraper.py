@@ -59,6 +59,22 @@ def _build_result(scraper, url: str, method: str | None) -> RecipeData:
     return RecipeData(url=url, method=method, warnings=warnings, **fields)
 
 
+def scrape_from_html(html: str, url: str) -> RecipeData:
+    """Parse a recipe from already-fetched HTML. Tries strict then wild mode."""
+    last_error: Exception | None = None
+    try:
+        scraper = scrape_html(html, org_url=url, wild_mode=False)
+        return _build_result(scraper, url, method="scrape_html_strict")
+    except Exception as e:
+        last_error = e
+    try:
+        scraper = scrape_html(html, org_url=url, wild_mode=True)
+        return _build_result(scraper, url, method="scrape_html_wild")
+    except Exception as e:
+        last_error = e
+    raise ValueError(f"Failed to parse recipe from HTML. Last error: {last_error}")
+
+
 def scrape_url(url: str) -> RecipeData:
     """
     Scrape structured recipe data from the given URL.

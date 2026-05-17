@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -38,7 +38,7 @@ async def create_recipe(
         original_html=original_html,
         parser_method=parsed.method,
         warnings=parsed.warnings,
-        parsed_at=datetime.now(timezone.utc),
+        parsed_at=datetime.now(),
         parsed_snapshot=snapshot,
     )
     session.add(recipe)
@@ -125,12 +125,60 @@ async def list_recipes(
     return list(result.all())
 
 
-async def is_possible_duplicate(
+async def get_first_duplicate_id(
     session: AsyncSession, *, user_id: str, source_url: str
-) -> bool:
-    existing = await session.scalar(
+) -> str | None:
+    return await session.scalar(
         select(Recipe.id)
         .where(Recipe.user_id == user_id, Recipe.source_url == source_url)
         .limit(1)
     )
-    return existing is not None
+
+
+async def count_recipes(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    title_q: str | None = None,
+    collection_id: str | None = None,
+) -> int:
+    stmt = select(func.count(Recipe.id)).where(Recipe.user_id == user_id)
+    if title_q:
+        stmt = stmt.where(func.lower(Recipe.title).contains(title_q.lower()))
+    if collection_id is not None:
+        stmt = (
+            stmt.join(RecipeCollection, RecipeCollection.recipe_id == Recipe.id)
+            .join(Collection, Collection.id == RecipeCollection.collection_id)
+            .where(Collection.id == collection_id, Collection.user_id == user_id)
+        )
+    return await session.scalar(stmt) or 0
+
+
+async def get_recipe_collection_ids(
+    session: AsyncSession, *, recipe_id: str
+) -> list[str]:
+    result = await session.scalars(
+        select(RecipeCollection.collection_id).where(
+            RecipeCollection.recipe_id == recipe_id
+        )
+    )
+    return list(result.all())
+
+
+async def create_minimal_recipe(
+    session: AsyncSession,
+    *,
+    user_id: str,
+    source_url: str,
+    original_html: str | None,
+    reason: str,
+) -> Recipe:
+    recipe = Recipe(
+        user_id=user_id,
+        source_url=source_url,
+        original_html=original_html,
+        warnings=[f"parse_failed: {reason}"],
+    )
+    session.add(recipe)
+    await session.flush()
+    return recipe
