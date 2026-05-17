@@ -1,3 +1,7 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
 [project]
 name = "recipe-saver-backend"
 version = "0.1.0"
