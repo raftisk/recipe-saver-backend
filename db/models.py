@@ -15,6 +15,11 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    last_sign_in_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -24,6 +29,12 @@ class User(Base):
     )
     collections: Mapped[list["Collection"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    sessions: Mapped[list["Session"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    auth_events: Mapped[list["AuthEvent"]] = relationship(
+        back_populates="user", passive_deletes=True
     )
 
 
@@ -127,3 +138,40 @@ class RecipeCollection(Base):
 
     recipe: Mapped[Recipe] = relationship(back_populates="collection_links")
     collection: Mapped[Collection] = relationship(back_populates="recipe_links")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    client: Mapped[str] = mapped_column(String(16), nullable=False, default="web")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class AuthEvent(Base):
+    __tablename__ = "auth_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    client_ip: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped[User | None] = relationship(back_populates="auth_events")
